@@ -151,6 +151,11 @@ const startServer = async () => {
           </button>
         </div>
 
+        <div class="bg-gray-700/50 p-4 rounded-lg flex-row items-center justify-between">
+          <p>IP: 157.10.252.9</p>
+          <P>Port: 19132</P>
+        </div>
+
         <button 
           @click="startServer"
           :disabled="isStarting || isRefreshing || vpsData.status === 'running' || vpsData.status === 'stopping'"
