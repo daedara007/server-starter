@@ -15,7 +15,7 @@ const isStarting = ref(false);
 const vpsData = reactive({
   status: 'unknown',
   name: '',
-  ip: ''
+  ip: '157.10.252.9'
 });
 
 // --- DATA MINECRAFT ---
