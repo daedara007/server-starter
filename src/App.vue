@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive } from 'vue';
+import { ref, reactive, onUnmounted } from 'vue'; // Tambah onUnmounted
 
 // State yang sudah DIPISAH agar tidak bentrok
 const isLoggedIn = ref(false);
@@ -7,9 +7,9 @@ const passwordInput = ref('');
 const errorMsg = ref('');
 
 // Loading states terpisah
-const isLoggingIn = ref(false);  // Loading saat login
-const isRefreshing = ref(false); // Loading saat refresh status
-const isStarting = ref(false);   // Loading saat menyalakan server
+const isLoggingIn = ref(false);
+const isRefreshing = ref(false);
+const isStarting = ref(false);
 
 // Data VPS
 const vpsData = reactive({
@@ -18,15 +18,40 @@ const vpsData = reactive({
   ip: ''
 });
 
+// Variable untuk menyimpan interval polling
+let pollingInterval = null;
+
+// --- Logic Polling (BARU) ---
+const startPolling = () => {
+  // Cegah double interval
+  if (pollingInterval) return;
+
+  // Cek setiap 5 detik (5000ms)
+  pollingInterval = setInterval(() => {
+    // Hanya refresh jika user sedang login
+    if (isLoggedIn.value) {
+      // Parameter false = silent refresh (tidak muter loading di UI)
+      fetchStatus(false); 
+    }
+  }, 5000);
+};
+
+// Bersihkan interval saat user menutup/reload tab (PENTING)
+onUnmounted(() => {
+  if (pollingInterval) clearInterval(pollingInterval);
+});
+
 // --- Logic Login ---
 const handleLogin = async () => {
-  isLoggingIn.value = true; // Pakai isLoggingIn
+  isLoggingIn.value = true;
   errorMsg.value = '';
   
   try {
-    // Kita panggil fetchStatus tapi jangan trigger isRefreshing (silent check)
     await fetchStatus(false); 
     isLoggedIn.value = true;
+    
+    // Jalankan polling otomatis begitu login berhasil
+    startPolling(); 
   } catch (err) {
     errorMsg.value = "Password salah atau koneksi gagal.";
   } finally {
@@ -49,9 +74,8 @@ const callApi = async (endpoint, method = 'GET') => {
 };
 
 // --- Logic Refresh Status ---
-// Parameter useLoading: true jika diklik tombol refresh, false jika dipanggil saat login
 const fetchStatus = async (useLoading = true) => {
-  if (useLoading) isRefreshing.value = true; // Pakai isRefreshing
+  if (useLoading) isRefreshing.value = true;
   
   try {
     const data = await callApi('status');
@@ -59,9 +83,9 @@ const fetchStatus = async (useLoading = true) => {
     vpsData.name = data.name || 'VPS IDCloudHost';
     vpsData.ip = data.private_ipv4 || data.public_ipv4 || '-'; 
   } catch (e) {
+    // Silent error di console aja kalau lagi polling otomatis, biar ga ganggu user
     console.error(e);
     if(isLoggedIn.value && useLoading) alert("Gagal refresh status");
-    throw e;
   } finally {
     if (useLoading) isRefreshing.value = false;
   }
@@ -71,14 +95,17 @@ const fetchStatus = async (useLoading = true) => {
 const startServer = async () => {
   if(!confirm("Yakin ingin menyalakan server?")) return;
   
-  isStarting.value = true; // Pakai isStarting
+  isStarting.value = true;
+  // Optimistic UI: Langsung ubah status jadi 'starting' biar tombol berubah
+  vpsData.status = 'starting'; 
+
   try {
     await callApi('start', 'POST');
-    alert("Perintah start dikirim! Tunggu sebentar lalu refresh.");
-    // Auto refresh setelah 5 detik
-    setTimeout(() => fetchStatus(true), 5000);
+    // Tidak perlu alert, status akan update sendiri lewat polling
+    // Polling sudah jalan sejak login, jadi dia akan menangkap perubahan status
   } catch (e) {
     alert("Gagal menyalakan server.");
+    vpsData.status = 'stopped'; // Balikin status kalau gagal
   } finally {
     isStarting.value = false;
   }
