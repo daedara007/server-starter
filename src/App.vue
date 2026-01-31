@@ -15,12 +15,11 @@ const isStarting = ref(false);
 const vpsData = reactive({
   status: 'unknown',
   name: '',
-  ip: '157.10.252.9'
+  ip: ''
 });
 
 // --- DATA MINECRAFT ---
 const mcServerData = ref(null);
-// FIX: Tambahkan ini karena dipakai di bawah
 const cacheAge = ref(0); 
 
 let pollingInterval = null;
@@ -30,6 +29,8 @@ const startPolling = () => {
   if (pollingInterval) return;
   pollingInterval = setInterval(() => {
     if (isLoggedIn.value) {
+      // Saat polling, throwError = false (default)
+      // Supaya kalau error koneksi sesaat, app tidak crash
       fetchStatus(false); 
       fetchMcStatus(); 
     }
@@ -45,12 +46,18 @@ const handleLogin = async () => {
   isLoggingIn.value = true;
   errorMsg.value = '';
   try {
-    await Promise.all([fetchStatus(false), fetchMcStatus()]);
+    // FIX: Tambahkan parameter 'true' agar error dilempar jika password salah
+    await fetchStatus(false, true);
+    
+    // Ambil data MC (ini boleh gagal kalau server mati, jadi tidak perlu throw)
+    await fetchMcStatus();
+    
     isLoggedIn.value = true;
     startPolling(); 
   } catch (err) {
+    // Sekarang error akan tertangkap di sini!
     errorMsg.value = "Password salah atau koneksi gagal.";
-    console.error(err);
+    console.error("Login Failed:", err);
   } finally {
     isLoggingIn.value = false;
   }
@@ -62,12 +69,16 @@ const callApi = async (endpoint, method = 'GET') => {
     method: method,
     headers: { 'x-app-auth': passwordInput.value }
   });
+  
+  // Jika 401 (Unauthorized), ini akan melempar Error
   if (res.status === 401) throw new Error("Unauthorized");
   if (!res.ok) throw new Error("API Error");
   return await res.json();
 };
 
-const fetchStatus = async (useLoading = true) => {
+// --- FETCH STATUS VPS (MODIFIED) ---
+// Parameter baru: throwError (default false)
+const fetchStatus = async (useLoading = true, throwError = false) => {
   if (useLoading) isRefreshing.value = true;
   try {
     const data = await callApi('status');
@@ -76,19 +87,21 @@ const fetchStatus = async (useLoading = true) => {
     if (data.public_ipv4) vpsData.ip = data.public_ipv4;
   } catch (e) {
     console.error("VPS Fetch Error:", e);
+    
+    // FIX UTAMA: Jika mode login (throwError=true), lempar error ke handleLogin
+    if (throwError) throw e;
+    
+    // Jika sedang polling, biarkan silent error
   } finally {
     if (useLoading) isRefreshing.value = false;
   }
 };
 
-// --- FETCH MC STATUS (FIXED) ---
+// --- FETCH MC STATUS ---
 const fetchMcStatus = async () => {
   try {
     const res = await fetch('/api/check-mc');
-    
-    // Cek jika response bukan JSON (biasanya error 404/500)
     if (!res.ok) throw new Error(`API Error: ${res.status}`);
-    
     const data = await res.json();
     
     mcServerData.value = {
@@ -96,13 +109,9 @@ const fetchMcStatus = async () => {
       players: data.players,
       motd: { clean: [data.motd || ''] } 
     };
-    
-    cacheAge.value = 0; // Sekarang aman karena variabelnya sudah ada
-
+    cacheAge.value = 0;
   } catch (e) {
     console.error("MC Fetch Error:", e);
-    // Jangan set offline jika errornya cuma masalah jaringan sesaat
-    // mcServerData.value = { online: false, players: { online:0, max:0 } };
   }
 };
 
@@ -113,9 +122,11 @@ const startServer = async () => {
   vpsData.status = 'starting'; 
 
   try {
+    // Saat start server, kita juga ingin tahu kalau password/token kadaluarsa
+    // Jadi kita pakai callApi langsung yang akan throw error jika 401
     await callApi('start', 'POST');
   } catch (e) {
-    alert("Gagal menyalakan server.");
+    alert("Gagal menyalakan server. Cek password atau koneksi.");
     vpsData.status = 'stopped'; 
   } finally {
     isStarting.value = false;
@@ -230,8 +241,8 @@ const startServer = async () => {
             <svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
             Processing...
           </span>
-          <span v-else-if="vpsData.status === 'running'">Server Sudah Jalan ✅</span>
-          <span v-else-if="vpsData.status === 'stopping'">Sedang Stopping... 🛑</span>
+          <span v-else-if="vpsData.status === 'running'">Mesin Sudah Jalan ✅</span>
+          <span v-else-if="vpsData.status === 'stopping'">Mesin Sedang Stopping... 🛑</span>
           <span v-else>Nyalakan Server 🔥🔥</span>
         </button>
         
